@@ -1,0 +1,241 @@
+---
+title: "Global Vectors"
+author: "Ma. Fernanda Rubio"
+date: "24 de mayo de 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+# install.packages("wordVectors")
+# library(wordVectors)
+# install.packages("text2vec")
+library(text2vec)
+library(ggplot2)
+# install.packages("quanteda")
+library(quanteda)
+# install.packages("devtools") # get devtools to install quanteda.corpora
+# devtools::install_github("quanteda/quanteda.corpora")
+```
+
+## Introducción
+Existen dos familias de algoritmos para "aprender" vectores de palabras: *global matrix factorization* como LSA y *local context widow* como skip-gram. Mientras la primer familia de modelos aprovechan la información estadística, no son tan buenos para encontrar analogías de palabras. La segunda tiene un buen performace para analogías de palabras pero no es tan buena en la extracción de información estadística. Sin embargo, GloVe combina las ventajas de las 2 familias de modelos.
+
+## Probabilidades de co-ocurrencias
+
+TABLA DEL LIBRO
+
+## Definición del modelo
+GloVe es un algoritmo *no supervisado* para obtener representaciones vectoriales de palabras.
+Sea:
+$X$ la matriz de coocurrencia.
+$X_{i,j}$ el número de veces la palabra j ocurre en el contexto de la palabra i.
+$X_{i} = \sum_{k}X_{i,k}$ el número de veces que la palabra i ocurre en el contexto de cualquier palabra.
+$P_{i,j} = P(j|i) = \frac{X_{i,k}}{X_{j,k}}$ la probabilidad de que j aparezca en el contexto de i.
+Para 2 palabras $i$, $j$ y un set de palabras $k$ de contexto, su relación se estudia por el ratio de sus coocurrencias:
+
+  * para palabras relacionadas a i pero no a j $\frac{P_{i,k}}{P_{j,k}}$ será grande.
+  * para palabras relacionadas a j pero no a i  $\frac{P_{i,k}}{P_{j,k}}$ será pequeño.
+  * para palabras relacionadas por igual a i y j o no relacionadas $\frac{P_{i,k}}{P_{j,k}}$ será cercano a 1.
+![](ejemplo_ratios.PNG)
+
+
+Comparar estos ratios nos permite saber qué palabras son relevantes y a discriminar para qué palabra son relevantes. Entonces el principio de GloVe es una función que depende de 3 palabras i, j y k:
+$$F(w_{i}, w_{j}, \hat{w}_{k})=\frac{P_{i,k}}{P_{j,k}}$$
+donde $w_{i}, w_{j}$ son vectores de palabras y $\hat{w}_{k}$ vectores de palabras de contexto, $F$ puede ser cualquier función pero nos gustaría que capturara más información de $\frac{P_{i,k}}{P_{j,k}}$. Ya que los espacios vectoriales son estructuras lineales lo más nattural es tomar diferencias:
+$$F(w_{i}-w_{j}, \hat{w}_{k})=\frac{P_{i,k}}{P_{j,k}}$$
+Ahora en el lado izquierdo tenemos como argumentos vectores mientras que el lado derecho hay un escalar, para resolver esto se puede tomar el producto punto:
+
+$$F((w_{i}-w_{j})^{t}\hat{w}_{k})=\frac{P_{i,k}}{P_{j,k}}$$
+Para matrices de coocurrencia, la diferencia entre una palabra y una palabra de contexto es arbitraria y podemos intercambiar los roles, para hacer esto en el modelo necesitamos que F sea un homomorfismo entre $(R,+)$ y $(R_{>0}, \times)$:
+$$F((w_{i}-w_{j})^{t}\hat{w}_{k})=\frac{F(w_{i}^{t}\hat{w}_{k})}{F(w_{j}^{t}\hat{w}_{k})}$$
+Según ecuaciones anteriores, esto implica que:
+$$F(w_{i}^{t}\hat{w}_{k})=P_{ik}=\frac{X_{ik}}{X_{i}}$$
+La solución a esto es F = exp:
+$$F(w_{i}^{t}\hat{w}_{k})=exp(w_{i}^{t}\hat{w}_{k})$$
+$$w_{i}^{t}\hat{w}_{k}=ln(P_{ik})=ln\Big(\frac{X_{ik}}{X_{i}}\Big)$$
+$$w_{i}^{t}\hat{w}_{k}=ln(X_{ik})-ln(X_{i})$$
+Finalmente, esta ecuación aún refleja un poco del intercambio que hicimos entre palabras y palabras de contexto capturado en $X_{i}$, lo podemos absorver en $b_{i}$ un sesgo para $w_{i}$  y para reestablecer la simetría agregamos un sesgo $\hat{b}_{k}$ para $\hat{b}_{k}$:
+$$w_{i}^{t}\hat{w}_{k}+b_{i}+\hat{b}_{k}=ln(X_{ik})$$
+Un problema de este modelo es que pesa por igual todas las coocurrencias de palabras sin importar su frecuencia, lo que proponen es una regresión de mínimos cuadrados ponderados para solventarlo. Conviertiendo la ecuación anterior a un problema de mínimos cuadrados con $f(x_{ij})$ como funicón de costos:
+$$J=\sum_{i,j=1}^{V}f(X_{ij})(w_{i}^{t}\hat{w}_{k}+b_{i}+\hat{b}_{k}-ln(X_{ik}))^2$$
+donde $V$ es el tamaño del vocabulario.
+La función de costos debe cumplir:
+  * $f(0) = 0$
+  * $f(x)$ debe ser no decreciente para que las ocurrencias poco frecuentes no tomen mucho peso.
+  * $f(x)$ debe ser relativamente pequeña para x grandes para que las ocurrencias muy frecuentes no tomen mucho peso.
+  
+Hay muchas funciones que cumplen con esto pero la elegida para GloVe es:
+$$f(x)= \left\{ \begin{array}{lcc}
+             (\frac{X}{X_{max}})^{\alpha} & si & x<x_{max}\\
+             \\1 & eoc
+             \end{array}
+   \right.$$
+con $X_{max}=100$ y $\alpha=\frac{3}{4}$ como parámetros óptimos.
+
+
+
+## Ventajas del modelo
+Es más eficiente porque entrena únicamente en los elementos no-cero o no vacíos en una matriz de occurrencia palabra por palabra, en lugar de la matriz rala completa o en ventanas de contexto individual en un corpus grande. 
+Tiene buen desempeño para extracción de información estadística.
+Es bueno para encontrar analogías de palabras
+
+## Preparando los datos
+Los datos son los mismos que se utlizaron en el vignette de word2vec, una muestra de artículos de wikipedia:
+```{r download_data, echo=TRUE, message=FALSE}
+wiki_corp <- quanteda.corpora::download(url = "https://www.dropbox.com/s/9mubqwpgls3qi9t/data_corpus_wiki.rds?dl=1")
+```
+En el siguiente paso vamos a crear el vocabulario del que vamos a aprender los vectores  de palabras. Tokenizamos  el corpus y obtenemos las features que suceden 5 veces o más:
+```{r vocabulary}
+wiki_toks <- tokens(wiki_corp)
+feats <- dfm(wiki_toks, verbose = TRUE) %>%
+    dfm_trim(min_termfreq = 5) %>%
+    featnames()
+wiki_toks <- tokens_select(wiki_toks, feats, padding = TRUE)
+```
+Construimos la matriz de coocurrencia:
+```{r coocurrence_matrix}
+wiki_fcm <- fcm(wiki_toks, context = "window", count = "weighted", weights = 1 / (1:5), tri = TRUE)
+```
+
+## Modelo GloVe
+Entrenamos el modelo:
+```{r glove_training}
+glove <- GlobalVectors$new(rank = 50, x_max = 10)
+wv_main <- glove$fit_transform(wiki_fcm, n_iter = 10,
+                               convergence_tol = 0.01, n_threads = 8)
+```
+Sumamos las palabras con el contexto para tener mayor accuracy:
+```{r}
+wv_context <- glove$components
+word_vectors <- wv_main + t(wv_context)
+```
+
+
+
+## Entrenar word2vec
+Este modelo está entrenado como el de clase:
+```{r, echo=TRUE, message=FALSE}
+normalizar <- function(texto, vocab = NULL){
+  # minúsculas
+  texto <- tolower(texto)
+  # varios ajustes
+  texto <- gsub("\\s+", " ", texto)
+  texto <- gsub("\\.[^0-9]", " _punto_ ", texto)
+  texto <- gsub(" _s_ $", "", texto)
+  texto <- gsub("\\.", " _punto_ ", texto)
+  texto <- gsub("[«»¡!¿?-]", "", texto) 
+  texto <- gsub(";", " _punto_coma_ ", texto) 
+  texto <- gsub("\\:", " _dos_puntos_ ", texto) 
+  texto <- gsub("\\,[^0-9]", " _coma_ ", texto)
+  texto <- gsub("\\s+", " ", texto)
+  texto
+}
+wiki_df <- tibble(txt = wiki_corp) %>%
+                mutate(id = row_number()) %>%
+                mutate(txt = normalizar(txt))
+
+if(!file.exists('./salidas/wiki_w2v.txt')){
+  tmp <- tempfile()
+  # tokenización
+  write_lines(wiki_df$txt,  tmp)
+  prep <- prep_word2vec(tmp, 
+          destination = './salidas/wiki_w2v.txt', bundle_ngrams = 2)
+} 
+
+if (!file.exists("./salidas/wiki_vectors.bin")) {
+  model_w2v <- train_word2vec("./salidas/wiki_w2v.txt", 
+          "./salidas/wiki_vectors.bin",
+          vectors = 100, threads = 4, window = 5, cbow = 0,  
+          iter = 5, negative_samples = 20, min_count = 5) 
+} else {
+  model_w2v <- read.vectors("./salidas/wiki_vectors.bin")
+}
+```
+
+## Datos de prueba
+```{r}
+test_data <- read_delim("words_for_testing.csv", delim = " ", col_names = F) %>% 
+  rename(group = X5, word_to_predict = X3) %>% 
+  select(X1, X2, X4, word_to_predict, group) %>% 
+  mutate_all(tolower) %>% 
+  filter(X1 %in% rownames(word_vectors), X2 %in% rownames(word_vectors), X4 %in% rownames(word_vectors))
+```
+### Comparación
+Esta función calcula los vectores de diferencia y obtiene la palabra con mayor similitud para cada modelo:
+```{r, warning=FALSE}
+similarity_comp <- function(test_data){
+  for (i in 1:nrow(test_data)) {
+    vec_glove <- word_vectors[test_data$X1[i], , drop = FALSE] -
+      word_vectors[test_data$X2[i], , drop = FALSE] +
+      word_vectors[test_data$X4[i], , drop = FALSE]
+    vec_w2v <- model_w2v[[test_data$X1[i]]] - model_w2v[[test_data$X2[i]]] +
+      model_w2v[[test_data$X4[i]]]
+    cos_sim <- textstat_simil(x = as.dfm(word_vectors), y = as.dfm(vec_glove), method = "cosine")
+    order_words <- head(sort(cos_sim[, 1], decreasing = TRUE), 5)
+    closest_word_glove <- order_words %>% as_tibble() %>% mutate(word = names(order_words)) %>% 
+      filter(word != test_data$X4[i])
+    closest_word_w2v <- model_w2v %>% closest_to(vec_w2v, n = 5) %>% 
+      filter(word != test_data$X4[i])
+    test_data$prediction_glove[i] <- closest_word_glove$word[1]
+    test_data$conf_glove[i] <- closest_word_glove$value[1]
+    test_data$prediction_w2v[i] <- closest_word_w2v$word[1]
+    test_data$conf_w2v[i] <- closest_word_w2v$`similarity to vec_w2v`[1]
+  }
+  test_data
+}
+```
+
+### Prueba con datos de familia
+Estos datos reflejan relaciones familiares:
+```{r, warning=FALSE}
+fam_test_data <- test_data %>% 
+  filter(group == 'family') %>% 
+  select(-group)
+head(fam_test_data)
+```
+
+Aplicamos la función:
+```{r, warning=FALSE}
+fam_test_data <- fam_test_data %>% 
+  mutate(prediction_glove = NA, conf_glove = NA, prediction_w2v = NA, conf_w2v = NA)
+fam_test_data <- similarity_comp(fam_test_data)
+```
+vemos en cuántas ocasiones el modelo dio la palabra que estabamos buscando, en este caso el performance de GloVe es mejor que el de word2vec:
+```{r, warning=FALSE}
+fam_eval <- fam_test_data %>% 
+  mutate(equal_glove = if_else(word_to_predict == prediction_glove, 1, 0),
+         equal_w2v = if_else(word_to_predict == prediction_w2v, 1, 0))
+
+fam_eval %>% filter(equal_glove == 1) %>% head(10)
+fam_eval %>% 
+  summarise(sum(equal_glove), sum(equal_w2v))
+```
+
+ 
+## Prueba con datos de capitales del mundo
+```{r}
+country_test_data <- test_data %>% 
+  filter(group == 'capital-world') %>% 
+  select(-group) 
+head(country_test_data)
+```
+
+Aplicamos la función:
+```{r, warning=FALSE}
+country_test_data <- country_test_data %>% 
+  mutate(prediction_glove = NA, conf_glove = NA, prediction_w2v = NA, conf_w2v = NA)
+country_test_data <- similarity_comp(country_test_data)
+```
+vemos en cuántas ocasiones el modelo dio la palabra que estabamos buscando, en este caso el performance de GloVe es mejor que el de word2vec:
+```{r, warning=FALSE}
+country_eval <- country_test_data %>% 
+  mutate(equal_glove = if_else(word_to_predict == prediction_glove, 1, 0),
+         equal_w2v = if_else(word_to_predict == prediction_w2v, 1, 0))
+
+country_eval %>% filter(equal_glove == 1) %>% head(10)
+ country_eval %>% 
+  summarise(sum(equal_glove), sum(equal_w2v))
+```
+
