@@ -6,6 +6,8 @@ data/
 *.DS_Store
 *.Rhistory
 *.csv
+*.RData
+*.pdf
 build/README.md
 build/environment.yml
 *egg-info*
